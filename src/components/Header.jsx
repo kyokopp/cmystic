@@ -3,10 +3,10 @@ import { ModeToggle } from "./mode-toggle"
 
 export const Header = () => {
   return (
-    <header className="border-b py-4">
+    <header className="frosted-glass-strong py-4 border-b border-white/10">
       <div className="container mx-auto px-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <Heart className="h-6 w-6 text-red-500 fill-red-500" />
+          <Heart className="h-6 w-6 text-red-500 fill-red-500 animate-pulse-slow" />
           <h1 className="text-xl font-bold">Mystic</h1>
         </div>
         <div className="flex items-center gap-4">

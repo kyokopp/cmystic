@@ -116,7 +116,7 @@ function MusicPlayer() {
 
   return (
     <div className="max-w-md mx-auto">
-      <div className="bg-card text-card-foreground rounded-lg shadow-lg overflow-hidden">
+      <div className="frosted-glass rounded-lg shadow-lg overflow-hidden">
         <div className="relative">
           <div
             className={cn(
@@ -156,7 +156,7 @@ function MusicPlayer() {
           </div>
 
           <div className="flex justify-center items-center gap-4">
-            <button onClick={prevSong} className="p-2 rounded-full hover:bg-muted transition-colors">
+            <button onClick={prevSong} className="p-2 rounded-full hover:bg-background/50 transition-colors">
               <SkipBack className="h-6 w-6" />
             </button>
 
@@ -167,7 +167,7 @@ function MusicPlayer() {
               {isPlaying ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
             </button>
 
-            <button onClick={nextSong} className="p-2 rounded-full hover:bg-muted transition-colors">
+            <button onClick={nextSong} className="p-2 rounded-full hover:bg-background/50 transition-colors">
               <SkipForward className="h-6 w-6" />
             </button>
           </div>

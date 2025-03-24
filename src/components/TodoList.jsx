@@ -31,7 +31,7 @@ function TodoList() {
 
   return (
     <div className="max-w-md mx-auto">
-      <div className="bg-card text-card-foreground rounded-lg shadow-lg p-6">
+      <div className="frosted-glass rounded-lg shadow-lg p-6">
         <h2 className="text-2xl font-bold mb-4 flex items-center">
           <span className="bg-primary/10 text-primary p-2 rounded-full mr-2">
             <CheckCircle className="h-5 w-5" />
@@ -46,7 +46,7 @@ function TodoList() {
             onChange={(e) => setTask(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Digite uma tarefa..."
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-10 w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           />
           <button
             onClick={addTask}
@@ -66,7 +66,7 @@ function TodoList() {
             {tasks.map((task) => (
               <li
                 key={task.id}
-                className="flex items-center justify-between p-3 rounded-md border bg-card hover:bg-accent/50 transition-colors animate-slide-in"
+                className="flex items-center justify-between p-3 rounded-md border bg-background/50 hover:bg-accent/50 transition-colors animate-slide-in"
               >
                 <div className="flex items-center">
                   <button

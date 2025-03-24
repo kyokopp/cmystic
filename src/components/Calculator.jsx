@@ -133,7 +133,7 @@ function Calculator() {
         case "accent":
           return "bg-accent text-accent-foreground hover:bg-accent/80"
         default:
-          return "bg-muted hover:bg-muted/80"
+          return "bg-background/50 hover:bg-background/70"
       }
     }
 
@@ -153,10 +153,10 @@ function Calculator() {
 
   return (
     <div className="max-w-xs mx-auto">
-      <div className="bg-card text-card-foreground rounded-lg shadow-lg overflow-hidden">
-        <div className="p-4 bg-muted/30">
+      <div className="frosted-glass rounded-lg shadow-lg overflow-hidden">
+        <div className="p-4 bg-background/30">
           <h2 className="text-xl font-bold mb-2">Calculadora</h2>
-          <div className="bg-background rounded-lg p-4 text-right h-16 flex items-center justify-end overflow-hidden">
+          <div className="bg-background/50 rounded-lg p-4 text-right h-16 flex items-center justify-end overflow-hidden">
             <div className="text-2xl font-mono truncate animate-fade-in">{display}</div>
           </div>
         </div>
@@ -203,7 +203,7 @@ function Calculator() {
         </div>
 
         {history.length > 0 && (
-          <div className="p-4 border-t border-border">
+          <div className="p-4 border-t border-white/10">
             <h3 className="text-sm font-medium mb-2">Histórico</h3>
             <div className="max-h-32 overflow-y-auto text-xs text-muted-foreground">
               {history.map((item, index) => (

@@ -70,7 +70,7 @@ function NoteApp() {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
-      <div className="md:col-span-1 bg-card text-card-foreground rounded-lg shadow-lg p-4 h-[500px] flex flex-col">
+      <div className="md:col-span-1 frosted-glass rounded-lg shadow-lg p-4 h-[500px] flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-medium flex items-center gap-1">
             <FileText className="h-4 w-4" /> Minhas Notas
@@ -85,7 +85,7 @@ function NoteApp() {
           placeholder="Pesquisar notas..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full px-3 py-2 text-sm rounded-md border border-input mb-2"
+          className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background/50 mb-2"
         />
 
         <div className="overflow-y-auto flex-grow">
@@ -112,7 +112,7 @@ function NoteApp() {
         </div>
       </div>
 
-      <div className="md:col-span-2 bg-card text-card-foreground rounded-lg shadow-lg p-4 h-[500px] flex flex-col">
+      <div className="md:col-span-2 frosted-glass rounded-lg shadow-lg p-4 h-[500px] flex flex-col">
         <div className="flex justify-between items-center mb-4">
           <input
             type="text"
