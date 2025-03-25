@@ -14,7 +14,7 @@ function MusicPlayer() {
   const [error, setError] = useState(null)
   const audioRef = useRef(null)
   const youtubePlayerRef = useRef(null)
-  const volumeTimeoutRef = useRef(null) // For debouncing volume changes
+  const volumeTimeoutRef = useRef(null)
 
   const initialSongs = [
     {
@@ -45,9 +45,6 @@ function MusicPlayer() {
       isYouTube: true,
       cover: "",
     },
-
-      // para colocar mais musicas é so a gente colocar o titulo, artista, link, isYoutube = true se for do youtube e cover como place ""
-
   ]
 
   const [songs, setSongs] = useState(initialSongs)
@@ -96,8 +93,18 @@ function MusicPlayer() {
     setSongs(updatedSongs)
   }, [])
 
+  // Reset currentTime and duration when switching songs
+  useEffect(() => {
+    setCurrentTime(0)
+    setDuration(0)
+    setIsPlaying(false)
+    setError(null)
+  }, [currentSongIndex])
+
   // Handle YouTube Player for YouTube tracks
   useEffect(() => {
+    let interval = null
+
     if (currentSong.isYouTube && isYouTubeApiReady) {
       if (!window.YT || !window.YT.Player) {
         setError("Failed to load YouTube API. Please try again later.")
@@ -129,18 +136,21 @@ function MusicPlayer() {
           const duration = event.target.getDuration()
           setDuration(duration)
 
-          const interval = setInterval(() => {
-            const current = event.target.getCurrentTime()
-            setCurrentTime(current)
-            if (current >= duration) {
-              clearInterval(interval)
-              nextSong()
+          interval = setInterval(() => {
+            if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === "function") {
+              const current = youtubePlayerRef.current.getCurrentTime()
+              setCurrentTime(current)
+              if (current >= duration) {
+                clearInterval(interval)
+                nextSong()
+              }
             }
-          }, 1000)
-          return () => clearInterval(interval)
+          }, 250) // Update every 250ms for smoother progress
         } else if (event.data === window.YT.PlayerState.PAUSED) {
           setIsPlaying(false)
+          clearInterval(interval)
         } else if (event.data === window.YT.PlayerState.ENDED) {
+          clearInterval(interval)
           nextSong()
         }
       }
@@ -165,12 +175,15 @@ function MusicPlayer() {
     }
 
     return () => {
+      if (interval) {
+        clearInterval(interval)
+      }
       if (youtubePlayerRef.current) {
         youtubePlayerRef.current.destroy()
         youtubePlayerRef.current = null
       }
     }
-  }, [currentSongIndex, isYouTubeApiReady]) // Removed 'volume' from dependencies
+  }, [currentSongIndex, isYouTubeApiReady])
 
   // Update YouTube player volume when volume changes
   useEffect(() => {
@@ -184,9 +197,15 @@ function MusicPlayer() {
     if (!currentSong.isYouTube) {
       const audio = audioRef.current
 
-      const updateTime = () => setCurrentTime(audio.currentTime)
-      const updateDuration = () => setDuration(audio.duration)
-      const endedHandler = () => nextSong()
+      const updateTime = () => {
+        setCurrentTime(audio.currentTime)
+      }
+      const updateDuration = () => {
+        setDuration(audio.duration)
+      }
+      const endedHandler = () => {
+        nextSong()
+      }
 
       audio.addEventListener("timeupdate", updateTime)
       audio.addEventListener("loadedmetadata", updateDuration)
@@ -204,6 +223,7 @@ function MusicPlayer() {
         audio.removeEventListener("timeupdate", updateTime)
         audio.removeEventListener("loadedmetadata", updateDuration)
         audio.removeEventListener("ended", endedHandler)
+        audio.pause()
       }
     }
   }, [currentSongIndex, isPlaying, volume, isMuted])
@@ -255,7 +275,6 @@ function MusicPlayer() {
     const newVolume = Number.parseFloat(e.target.value)
     setVolume(newVolume)
 
-    // Debounce the volume update to avoid rapid calls
     if (volumeTimeoutRef.current) {
       clearTimeout(volumeTimeoutRef.current)
     }
@@ -307,28 +326,10 @@ function MusicPlayer() {
 
   const prevSong = () => {
     setCurrentSongIndex((prevIndex) => (prevIndex === 0 ? songs.length - 1 : prevIndex - 1))
-    setIsPlaying(true)
-    setError(null)
-    if (!currentSong.isYouTube) {
-      setTimeout(() => {
-        audioRef.current.play().catch((error) => {
-          setError("Error playing audio: " + error.message)
-        })
-      }, 100)
-    }
   }
 
   const nextSong = () => {
     setCurrentSongIndex((prevIndex) => (prevIndex === songs.length - 1 ? 0 : prevIndex + 1))
-    setIsPlaying(true)
-    setError(null)
-    if (!currentSong.isYouTube) {
-      setTimeout(() => {
-        audioRef.current.play().catch((error) => {
-          setError("Error playing audio: " + error.message)
-        })
-      }, 100)
-    }
   }
 
   return (
@@ -340,17 +341,14 @@ function MusicPlayer() {
           </div>
         )}
         <div className="relative">
-          <div
-            className={cn(
-              "aspect-square bg-muted overflow-hidden transition-transform duration-[20000ms] ease-linear",
-              isPlaying && "animate-spin-slow",
-            )}
-          >
-            <img
-              src={currentSong.cover || "/placeholder.svg?height=300&width=300"}
-              alt={currentSong.title}
-              className="w-full h-full object-cover rounded-full p-16"
-            />
+          <div className="w-full aspect-square bg-muted overflow-hidden">
+            <div className="relative w-full h-full">
+              <img
+                src={currentSong.cover || "/placeholder.svg?height=300&width=300"}
+                alt={currentSong.title}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            </div>
           </div>
 
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end">
