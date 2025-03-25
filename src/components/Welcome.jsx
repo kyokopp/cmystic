@@ -4,8 +4,8 @@ import { useState, useEffect } from "react"
 import { Heart, Gift, Star, Quote, Calendar } from "lucide-react"
 
 // GIFs para elementos animados
-const heartGif = "https://i.pinimg.com/originals/5c/73/d8/5c73d837ad836e59d71afdd49826191a.gif" // Substitua pelo URL do seu GIF
-const starGif = "https://i.pinimg.com/originals/5c/73/d8/5c73d837ad836e59d71afdd49826191a.gif" // Substitua pelo URL do seu GIF
+const heartGif = "https://i.pinimg.com/736x/8e/01/b4/8e01b4f7ab95b712522ab5a2331f0854.jpg" // Substitua pelo URL do seu GIF
+const starGif = "https://i.pinimg.com/736x/8e/01/b4/8e01b4f7ab95b712522ab5a2331f0854.jpg" // Substitua pelo URL do seu GIF
 
 function Welcome() {
   const [dailyPhrase, setDailyPhrase] = useState("")

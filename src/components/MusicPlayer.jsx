@@ -10,58 +10,227 @@ function MusicPlayer() {
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(0.7)
   const [isMuted, setIsMuted] = useState(false)
+  const [isYouTubeApiReady, setIsYouTubeApiReady] = useState(false)
+  const [error, setError] = useState(null)
   const audioRef = useRef(null)
+  const youtubePlayerRef = useRef(null)
+  const volumeTimeoutRef = useRef(null) // For debouncing volume changes
 
-  const songs = [
+  const initialSongs = [
     {
-      title: "Música Relaxante",
+      title: "Hino nacional",
       artist: "Artista Desconhecido",
-      src: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-      cover: "/placeholder.svg?height=300&width=300",
+      src: "https://music.youtube.com/watch?v=lzuK1Tye4-A&si=EzA2A0IzsrpIeKl0",
+      isYouTube: true,
+      cover: "",
     },
     {
-      title: "Melodia Suave",
-      artist: "Artista Anônimo",
-      src: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-      cover: "/placeholder.svg?height=300&width=300",
+      title: "All i need",
+      artist: "Radiohead",
+      src: "https://music.youtube.com/watch?v=FM7ALFsOH4g&si=gPXSWi569paTKuad3",
+      isYouTube: true,
+      cover: "",
     },
     {
-      title: "Ritmo Tranquilo",
-      artist: "Músico Desconhecido",
-      src: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-      cover: "/placeholder.svg?height=300&width=300",
+      title: "Wutiwant",
+      artist: "Saraunh0ly",
+      src: "https://music.youtube.com/watch?v=11iIJ8uSFTw&si=MSyQJwNVL8G24aAT",
+      isYouTube: true,
+      cover: "",
     },
+    {
+      title: "Screaming",
+      artist: "Loathe",
+      src: "https://music.youtube.com/watch?v=tGdbXTdVFVU&list=RDAMVMtGdbXTdVFVU",
+      isYouTube: true,
+      cover: "",
+    },
+
+      // para colocar mais musicas é so a gente colocar o titulo, artista, link, isYoutube = true se for do youtube e cover como place ""
+
   ]
 
+  const [songs, setSongs] = useState(initialSongs)
   const [currentSongIndex, setCurrentSongIndex] = useState(0)
   const currentSong = songs[currentSongIndex]
 
+  // Load YouTube IFrame API and wait for it to be ready
   useEffect(() => {
-    const audio = audioRef.current
+    if (!window.YT) {
+      const tag = document.createElement("script")
+      tag.src = "https://www.youtube.com/iframe_api"
+      const firstScriptTag = document.getElementsByTagName("script")[0]
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
 
-    const updateTime = () => setCurrentTime(audio.currentTime)
-    const updateDuration = () => setDuration(audio.duration)
-    const endedHandler = () => nextSong()
-
-    audio.addEventListener("timeupdate", updateTime)
-    audio.addEventListener("loadedmetadata", updateDuration)
-    audio.addEventListener("ended", endedHandler)
+      window.onYouTubeIframeAPIReady = () => {
+        setIsYouTubeApiReady(true)
+      }
+    } else {
+      setIsYouTubeApiReady(true)
+    }
 
     return () => {
-      audio.removeEventListener("timeupdate", updateTime)
-      audio.removeEventListener("loadedmetadata", updateDuration)
-      audio.removeEventListener("ended", endedHandler)
+      delete window.onYouTubeIframeAPIReady
     }
-  }, [currentSongIndex])
+  }, [])
+
+  // Dynamically set thumbnails for YouTube songs
+  useEffect(() => {
+    const updatedSongs = initialSongs.map((song) => {
+      if (song.isYouTube) {
+        try {
+          const url = new URL(song.src)
+          const videoId = url.searchParams.get("v") || song.src.split("v=")[1]?.split("&")[0]
+          if (videoId) {
+            return {
+              ...song,
+              cover: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+            }
+          }
+        } catch (error) {
+          console.error("Invalid YouTube URL for thumbnail:", song.src)
+        }
+      }
+      return song
+    })
+    setSongs(updatedSongs)
+  }, [])
+
+  // Handle YouTube Player for YouTube tracks
+  useEffect(() => {
+    if (currentSong.isYouTube && isYouTubeApiReady) {
+      if (!window.YT || !window.YT.Player) {
+        setError("Failed to load YouTube API. Please try again later.")
+        return
+      }
+
+      let videoId = ""
+      try {
+        const url = new URL(currentSong.src)
+        videoId = url.searchParams.get("v") || currentSong.src.split("v=")[1]?.split("&")[0]
+      } catch (error) {
+        setError("Invalid YouTube URL: " + currentSong.src)
+        return
+      }
+
+      if (!videoId) {
+        setError("Could not extract video ID from URL: " + currentSong.src)
+        return
+      }
+
+      const onPlayerReady = (event) => {
+        event.target.setVolume(volume * 100)
+        if (isPlaying) event.target.playVideo()
+      }
+
+      const onPlayerStateChange = (event) => {
+        if (event.data === window.YT.PlayerState.PLAYING) {
+          setIsPlaying(true)
+          const duration = event.target.getDuration()
+          setDuration(duration)
+
+          const interval = setInterval(() => {
+            const current = event.target.getCurrentTime()
+            setCurrentTime(current)
+            if (current >= duration) {
+              clearInterval(interval)
+              nextSong()
+            }
+          }, 1000)
+          return () => clearInterval(interval)
+        } else if (event.data === window.YT.PlayerState.PAUSED) {
+          setIsPlaying(false)
+        } else if (event.data === window.YT.PlayerState.ENDED) {
+          nextSong()
+        }
+      }
+
+      if (youtubePlayerRef.current) {
+        youtubePlayerRef.current.destroy()
+      }
+
+      youtubePlayerRef.current = new window.YT.Player("youtube-player", {
+        height: "0",
+        width: "0",
+        videoId: videoId,
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+        },
+        events: {
+          onReady: onPlayerReady,
+          onStateChange: onPlayerStateChange,
+        },
+      })
+    }
+
+    return () => {
+      if (youtubePlayerRef.current) {
+        youtubePlayerRef.current.destroy()
+        youtubePlayerRef.current = null
+      }
+    }
+  }, [currentSongIndex, isYouTubeApiReady]) // Removed 'volume' from dependencies
+
+  // Update YouTube player volume when volume changes
+  useEffect(() => {
+    if (currentSong.isYouTube && youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
+      youtubePlayerRef.current.setVolume(isMuted ? 0 : volume * 100)
+    }
+  }, [volume, isMuted])
+
+  // Handle <audio> element for non-YouTube tracks
+  useEffect(() => {
+    if (!currentSong.isYouTube) {
+      const audio = audioRef.current
+
+      const updateTime = () => setCurrentTime(audio.currentTime)
+      const updateDuration = () => setDuration(audio.duration)
+      const endedHandler = () => nextSong()
+
+      audio.addEventListener("timeupdate", updateTime)
+      audio.addEventListener("loadedmetadata", updateDuration)
+      audio.addEventListener("ended", endedHandler)
+
+      if (isPlaying) {
+        audio.play().catch((error) => {
+          setError("Error playing audio: " + error.message)
+        })
+      }
+
+      audio.volume = isMuted ? 0 : volume
+
+      return () => {
+        audio.removeEventListener("timeupdate", updateTime)
+        audio.removeEventListener("loadedmetadata", updateDuration)
+        audio.removeEventListener("ended", endedHandler)
+      }
+    }
+  }, [currentSongIndex, isPlaying, volume, isMuted])
 
   const togglePlay = () => {
-    const audio = audioRef.current
-    if (isPlaying) {
-      audio.pause()
+    if (currentSong.isYouTube) {
+      if (!youtubePlayerRef.current || typeof youtubePlayerRef.current.playVideo !== "function") {
+        setError("YouTube player not initialized. Please try again.")
+        return
+      }
+      if (isPlaying) {
+        youtubePlayerRef.current.pauseVideo()
+      } else {
+        youtubePlayerRef.current.playVideo()
+      }
+      setIsPlaying(!isPlaying)
     } else {
-      audio.play()
+      const audio = audioRef.current
+      if (isPlaying) {
+        audio.pause()
+      } else {
+        audio.play().catch((error) => {
+          setError("Error playing audio: " + error.message)
+        })
+      }
+      setIsPlaying(!isPlaying)
     }
-    setIsPlaying(!isPlaying)
   }
 
   const formatTime = (time) => {
@@ -73,13 +242,36 @@ function MusicPlayer() {
   const handleProgress = (e) => {
     const newTime = e.target.value
     setCurrentTime(newTime)
-    audioRef.current.currentTime = newTime
+    if (currentSong.isYouTube) {
+      if (youtubePlayerRef.current && typeof youtubePlayerRef.current.seekTo === "function") {
+        youtubePlayerRef.current.seekTo(newTime)
+      }
+    } else {
+      audioRef.current.currentTime = newTime
+    }
   }
 
   const handleVolume = (e) => {
     const newVolume = Number.parseFloat(e.target.value)
     setVolume(newVolume)
-    audioRef.current.volume = newVolume
+
+    // Debounce the volume update to avoid rapid calls
+    if (volumeTimeoutRef.current) {
+      clearTimeout(volumeTimeoutRef.current)
+    }
+
+    volumeTimeoutRef.current = setTimeout(() => {
+      if (currentSong.isYouTube) {
+        if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
+          youtubePlayerRef.current.setVolume(newVolume * 100)
+        } else {
+          setError("YouTube player not ready to adjust volume.")
+        }
+      } else {
+        audioRef.current.volume = newVolume
+      }
+    }, 100)
+
     if (newVolume === 0) {
       setIsMuted(true)
     } else {
@@ -88,12 +280,27 @@ function MusicPlayer() {
   }
 
   const toggleMute = () => {
-    const audio = audioRef.current
     if (isMuted) {
-      audio.volume = volume
+      if (currentSong.isYouTube) {
+        if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
+          youtubePlayerRef.current.setVolume(volume * 100)
+        } else {
+          setError("YouTube player not ready to adjust volume.")
+        }
+      } else {
+        audioRef.current.volume = volume
+      }
       setIsMuted(false)
     } else {
-      audio.volume = 0
+      if (currentSong.isYouTube) {
+        if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
+          youtubePlayerRef.current.setVolume(0)
+        } else {
+          setError("YouTube player not ready to adjust volume.")
+        }
+      } else {
+        audioRef.current.volume = 0
+      }
       setIsMuted(true)
     }
   }
@@ -101,22 +308,37 @@ function MusicPlayer() {
   const prevSong = () => {
     setCurrentSongIndex((prevIndex) => (prevIndex === 0 ? songs.length - 1 : prevIndex - 1))
     setIsPlaying(true)
-    setTimeout(() => {
-      audioRef.current.play()
-    }, 100)
+    setError(null)
+    if (!currentSong.isYouTube) {
+      setTimeout(() => {
+        audioRef.current.play().catch((error) => {
+          setError("Error playing audio: " + error.message)
+        })
+      }, 100)
+    }
   }
 
   const nextSong = () => {
     setCurrentSongIndex((prevIndex) => (prevIndex === songs.length - 1 ? 0 : prevIndex + 1))
     setIsPlaying(true)
-    setTimeout(() => {
-      audioRef.current.play()
-    }, 100)
+    setError(null)
+    if (!currentSong.isYouTube) {
+      setTimeout(() => {
+        audioRef.current.play().catch((error) => {
+          setError("Error playing audio: " + error.message)
+        })
+      }, 100)
+    }
   }
 
   return (
     <div className="max-w-md mx-auto">
       <div className="frosted-glass rounded-lg shadow-lg overflow-hidden">
+        {error && (
+          <div className="p-4 bg-red-500 text-white text-center">
+            {error}
+          </div>
+        )}
         <div className="relative">
           <div
             className={cn(
@@ -125,7 +347,7 @@ function MusicPlayer() {
             )}
           >
             <img
-              src={currentSong.cover || "/placeholder.svg"}
+              src={currentSong.cover || "/placeholder.svg?height=300&width=300"}
               alt={currentSong.title}
               className="w-full h-full object-cover rounded-full p-16"
             />
@@ -189,10 +411,10 @@ function MusicPlayer() {
         </div>
       </div>
 
-      <audio ref={audioRef} src={currentSong.src} className="hidden" />
+      <audio ref={audioRef} src={currentSong.isYouTube ? undefined : currentSong.src} className="hidden" />
+      <div id="youtube-player" className="hidden"></div>
     </div>
   )
 }
 
 export default MusicPlayer
-
