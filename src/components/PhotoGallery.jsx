@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
+import { openDB } from "idb";
 import {
   ImageIcon,
   FolderPlus,
@@ -33,6 +34,21 @@ const formatDate = (dateString) => {
   });
 };
 
+// Inicializar o IndexedDB
+const initDB = async () => {
+  return openDB("photo-gallery-db", 2, {
+    upgrade(db, oldVersion) {
+      // Explicitly create stores if they don't exist
+      if (!db.objectStoreNames.contains("files")) {
+        db.createObjectStore("files", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("photos")) {
+        db.createObjectStore("photos", { keyPath: "id" });
+      }
+    },
+  });
+};
+
 // Custom hook para debounce
 const useDebounce = (callback, delay) => {
   const callbackRef = useRef(callback);
@@ -51,12 +67,7 @@ const useDebounce = (callback, delay) => {
 };
 
 function PhotoGallery() {
-  // Estado para armazenar fotos, álbuns e configurações da UI
-  const [photos, setPhotos] = useState(() => {
-    const savedPhotos = localStorage.getItem("gallery-photos");
-    return savedPhotos ? JSON.parse(savedPhotos) : [];
-  });
-
+  const [photos, setPhotos] = useState([]);
   const [albums, setAlbums] = useState(() => {
     const savedAlbums = localStorage.getItem("gallery-albums");
     return savedAlbums ? JSON.parse(savedAlbums) : [{ id: "all", name: "Todas as Fotos", isDefault: true }];
@@ -65,7 +76,7 @@ function PhotoGallery() {
   const [selectedView, setSelectedView] = useState("all");
   const [selectedItems, setSelectedItems] = useState([]);
   const [isSelecting, setIsSelecting] = useState(false);
-  const [viewMode, setViewMode] = useState("grid"); // 'grid' ou 'detail'
+  const [viewMode, setViewMode] = useState("grid");
   const [currentPhoto, setCurrentPhoto] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddingAlbum, setIsAddingAlbum] = useState(false);
@@ -74,20 +85,31 @@ function PhotoGallery() {
   const [newItemName, setNewItemName] = useState("");
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, itemId: null });
   const [showSidebar, setShowSidebar] = useState(true);
-
-  // Adicionar estados para controle de drag and drop
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverAlbum, setDragOverAlbum] = useState(null);
 
   const fileInputRef = useRef(null);
   const renameInputRef = useRef(null);
   const albumInputRef = useRef(null);
+  const dbRef = useRef(null);
 
-  // Persistir dados no localStorage com debounce
-  useDebounce(() => {
-    localStorage.setItem("gallery-photos", JSON.stringify(photos));
-  }, 500, [photos]);
+  // Cache for photo URLs to prevent flickering
+  const urlCache = useRef(new Map());
 
+  // Inicializar o banco de dados e carregar fotos
+  useEffect(() => {
+    const setupDB = async () => {
+      dbRef.current = await initDB();
+      // Load photos from IndexedDB
+      const tx = dbRef.current.transaction("photos", "readonly");
+      const store = tx.objectStore("photos");
+      const allPhotos = await store.getAll();
+      setPhotos(allPhotos);
+    };
+    setupDB();
+  }, []);
+
+  // Persistir álbuns no localStorage com debounce
   useDebounce(() => {
     localStorage.setItem("gallery-albums", JSON.stringify(albums));
   }, 500, [albums]);
@@ -136,94 +158,214 @@ function PhotoGallery() {
   // Ordenar datas em ordem decrescente
   const sortedDates = Object.keys(groupedPhotos).sort((a, b) => new Date(b) - new Date(a));
 
-  // Manipuladores de eventos
-  const handleFileUpload = (e) => {
-    const files = Array.from(e.target.files);
+  // Função para carregar a URL de um arquivo do IndexedDB
+  const loadFileUrl = async (fileId) => {
+    if (!dbRef.current || !fileId) return "/placeholder.svg";
 
-    files.forEach((file) => {
-      const fileUrl = URL.createObjectURL(file);
-      const fileType = file.type.startsWith("video/") ? "video" : "image";
-      const newPhoto = {
-        id: generateId(),
-        name: file.name,
-        url: fileUrl,
-        type: fileType,
-        size: file.size,
-        date: new Date().toISOString(),
-        albums: ["all"],
-      };
+    // Check cache first
+    if (urlCache.current.has(fileId)) {
+      return urlCache.current.get(fileId);
+    }
 
-      if (selectedView !== "all") {
-        newPhoto.albums.push(selectedView);
-      }
-
-      setPhotos((prev) => [...prev, newPhoto]);
-    });
-
-    e.target.value = null;
+    const tx = dbRef.current.transaction("files", "readonly");
+    const store = tx.objectStore("files");
+    const file = await store.get(fileId);
+    if (file && file.blob) {
+      const url = URL.createObjectURL(file.blob);
+      urlCache.current.set(fileId, url);
+      return url;
+    }
+    return "/placeholder.svg";
   };
 
-  const handleDeletePhotos = (photoIds) => {
-    setPhotos((prev) => prev.filter((photo) => !photoIds.includes(photo.id)));
-    setSelectedItems([]);
-    setIsSelecting(false);
-    setContextMenu({ visible: false, x: 0, y: 0, itemId: null });
-    setCurrentPhoto(null);
-    setViewMode("grid");
+  // Manipuladores de eventos
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    try {
+      if (!dbRef.current) {
+        dbRef.current = await initDB();
+      }
+
+      const newPhotos = await Promise.all(
+        files.map(async (file) => {
+          const fileId = generateId();
+          const fileType = file.type.startsWith("video/") ? "video" : "image";
+
+          // Ensure transactions are properly created and awaited
+          const fileTx = dbRef.current.transaction("files", "readwrite");
+          const fileStore = fileTx.objectStore("files");
+          await fileStore.put({ id: fileId, blob: file });
+          await fileTx.done;
+
+          const newPhoto = {
+            id: fileId,
+            name: file.name,
+            fileId: fileId,
+            type: fileType,
+            size: file.size,
+            date: new Date().toISOString(),
+            albums: ["all"],
+          };
+
+          if (selectedView !== "all") {
+            newPhoto.albums.push(selectedView);
+          }
+
+          // Ensure photo transaction is properly created and awaited
+          const photoTx = dbRef.current.transaction("photos", "readwrite");
+          const photoStore = photoTx.objectStore("photos");
+          await photoStore.put(newPhoto);
+          await photoTx.done;
+
+          return newPhoto;
+        })
+      );
+
+      // Update photos state with new uploads
+      setPhotos((prev) => [...prev, ...newPhotos]);
+      
+      // Clear file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = null;
+      }
+    } catch (error) {
+      console.error("Error uploading files:", error);
+      alert("Failed to upload files. Please try again.");
+    }
+  };
+
+  const handleDeletePhotos = async (photoIds) => {
+    if (!dbRef.current) return;
+
+    try {
+      // Remover os arquivos do IndexedDB (files store)
+      const fileTx = dbRef.current.transaction("files", "readwrite");
+      const fileStore = fileTx.objectStore("files");
+      await Promise.all(photoIds.map((id) => fileStore.delete(id)));
+      await fileTx.done;
+
+      // Remover os metadados do IndexedDB (photos store)
+      const photoTx = dbRef.current.transaction("photos", "readwrite");
+      const photoStore = photoTx.objectStore("photos");
+      await Promise.all(photoIds.map((id) => photoStore.delete(id)));
+      await photoTx.done;
+
+      // Limpar o cache de URLs
+      photoIds.forEach((id) => {
+        if (urlCache.current.has(id)) {
+          URL.revokeObjectURL(urlCache.current.get(id));
+          urlCache.current.delete(id);
+        }
+      });
+
+      // Atualizar o estado
+      setPhotos((prev) => prev.filter((photo) => !photoIds.includes(photo.id)));
+      setSelectedItems([]);
+      setIsSelecting(false);
+      setContextMenu({ visible: false, x: 0, y: 0, itemId: null });
+      setCurrentPhoto(null);
+      setViewMode("grid");
+    } catch (error) {
+      console.error("Error deleting photos:", error);
+      alert("Failed to delete photos. Please try again.");
+    }
   };
 
   const handleDeleteAlbum = (albumId) => {
     if (albumId === "all") return;
 
     setAlbums((prev) => prev.filter((album) => album.id !== albumId));
-    setPhotos((prev) =>
-      prev.map((photo) => ({
-        ...photo,
-        albums: (photo.albums || []).filter((id) => id !== albumId),
-      }))
-    );
+
+    const updatedPhotos = photos.map((photo) => ({
+      ...photo,
+      albums: (photo.albums || []).filter((id) => id !== albumId),
+    }));
+
+    // Atualizar os metadados no IndexedDB
+    const updatePhotosInDB = async () => {
+      try {
+        const tx = dbRef.current.transaction("photos", "readwrite");
+        const store = tx.objectStore("photos");
+        await Promise.all(updatedPhotos.map((photo) => store.put(photo)));
+        await tx.done;
+      } catch (error) {
+        console.error("Error updating photos after album deletion:", error);
+      }
+    };
+    updatePhotosInDB();
+
+    setPhotos(updatedPhotos);
 
     if (selectedView === albumId) {
       setSelectedView("all");
     }
   };
 
-  const handleAddToAlbum = (photoId, albumId) => {
+  const handleAddToAlbum = async (photoId, albumId) => {
     if (albumId === "all") return;
 
-    setPhotos((prev) =>
-      prev.map((photo) => {
-        if (photo.id === photoId) {
-          if (!photo.albums || !photo.albums.includes(albumId)) {
-            return {
-              ...photo,
-              albums: [...(photo.albums || []), albumId],
-            };
-          }
+    const updatedPhotos = photos.map((photo) => {
+      if (photo.id === photoId) {
+        if (!photo.albums || !photo.albums.includes(albumId)) {
+          return {
+            ...photo,
+            albums: [...(photo.albums || []), albumId],
+          };
         }
-        return photo;
-      })
-    );
+      }
+      return photo;
+    });
 
+    // Atualizar os metadados no IndexedDB
+    try {
+      const tx = dbRef.current.transaction("photos", "readwrite");
+      const store = tx.objectStore("photos");
+      const photoToUpdate = updatedPhotos.find((photo) => photo.id === photoId);
+      if (photoToUpdate) {
+        await store.put(photoToUpdate);
+        await tx.done;
+      }
+    } catch (error) {
+      console.error("Error adding photo to album:", error);
+      return;
+    }
+
+    setPhotos(updatedPhotos);
     setContextMenu({ visible: false, x: 0, y: 0, itemId: null });
     setDraggedItem(null);
     setDragOverAlbum(null);
   };
 
-  const handleRemoveFromAlbum = (photoId, albumId) => {
+  const handleRemoveFromAlbum = async (photoId, albumId) => {
     if (albumId === "all") return;
 
-    setPhotos((prev) =>
-      prev.map((photo) => {
-        if (photo.id === photoId) {
-          return {
-            ...photo,
-            albums: (photo.albums || []).filter((id) => id !== albumId),
-          };
-        }
-        return photo;
-      })
-    );
+    const updatedPhotos = photos.map((photo) => {
+      if (photo.id === photoId) {
+        return {
+          ...photo,
+          albums: (photo.albums || []).filter((id) => id !== albumId),
+        };
+      }
+      return photo;
+    });
+
+    // Atualizar os metadados no IndexedDB
+    try {
+      const tx = dbRef.current.transaction("photos", "readwrite");
+      const store = tx.objectStore("photos");
+      const photoToUpdate = updatedPhotos.find((photo) => photo.id === photoId);
+      if (photoToUpdate) {
+        await store.put(photoToUpdate);
+        await tx.done;
+      }
+    } catch (error) {
+      console.error("Error removing photo from album:", error);
+      return;
+    }
+
+    setPhotos(updatedPhotos);
   };
 
   const handleContextMenu = (e, itemId) => {
@@ -364,17 +506,13 @@ function PhotoGallery() {
 
   // Componente para o modal de renomeação
   const RenameModal = () => {
-    // Local state to manage input value
     const [localItemName, setLocalItemName] = useState('');
 
-    // Update local state when renaming item changes
     useEffect(() => {
       if (isRenamingItem) {
-        // Find the current name based on the item type
-        const currentName = isRenamingItem.type === 'photo'
-          ? photos.find(p => p.id === isRenamingItem.id)?.name
-          : albums.find(a => a.id === isRenamingItem.id)?.name;
-        
+        const currentName = isRenamingItem.type === "photo"
+          ? photos.find((p) => p.id === isRenamingItem.id)?.name
+          : albums.find((a) => a.id === isRenamingItem.id)?.name;
         setLocalItemName(currentName || '');
       } else {
         setLocalItemName('');
@@ -393,22 +531,36 @@ function PhotoGallery() {
       }
     };
 
-    const handleRename = () => {
+    const handleRename = async () => {
       if (!localItemName.trim()) return;
 
       if (isRenamingItem.type === "photo") {
-        setPhotos((prev) =>
-          prev.map((photo) => 
-            photo.id === isRenamingItem.id 
-              ? { ...photo, name: localItemName.trim() } 
-              : photo
-          )
+        const updatedPhotos = photos.map((photo) =>
+          photo.id === isRenamingItem.id
+            ? { ...photo, name: localItemName.trim() }
+            : photo
         );
+
+        // Atualizar os metadados no IndexedDB
+        try {
+          const tx = dbRef.current.transaction("photos", "readwrite");
+          const store = tx.objectStore("photos");
+          const photoToUpdate = updatedPhotos.find((photo) => photo.id === isRenamingItem.id);
+          if (photoToUpdate) {
+            await store.put(photoToUpdate);
+            await tx.done;
+          }
+          setPhotos(updatedPhotos);
+        } catch (error) {
+          console.error("Error renaming photo:", error);
+          alert("Failed to rename photo. Please try again.");
+          return;
+        }
       } else if (isRenamingItem.type === "album") {
         setAlbums((prev) =>
-          prev.map((album) => 
-            album.id === isRenamingItem.id 
-              ? { ...album, name: localItemName.trim() } 
+          prev.map((album) =>
+            album.id === isRenamingItem.id
+              ? { ...album, name: localItemName.trim() }
               : album
           )
         );
@@ -470,10 +622,8 @@ function PhotoGallery() {
 
   // Componente para o modal de criação de álbum
   const AlbumModal = () => {
-    // Local state for album name
     const [localAlbumName, setLocalAlbumName] = useState('');
 
-    // Update local state when modal opens
     useEffect(() => {
       if (isAddingAlbum) {
         setLocalAlbumName(newAlbumName);
@@ -494,7 +644,7 @@ function PhotoGallery() {
       }
     };
 
-    const handleCreateAlbum = () => {
+    const handleCreateAlbum = async () => {
       if (!localAlbumName.trim()) return;
 
       const newAlbum = {
@@ -520,9 +670,24 @@ function PhotoGallery() {
           return photo;
         });
 
-        setPhotos(updatedPhotos);
-        setSelectedItems([]);
-        setIsSelecting(false);
+        // Atualizar os metadados no IndexedDB
+        try {
+          const tx = dbRef.current.transaction("photos", "readwrite");
+          const store = tx.objectStore("photos");
+          await Promise.all(
+            updatedPhotos
+              .filter((photo) => selectedItems.includes(photo.id))
+              .map((photo) => store.put(photo))
+          );
+          await tx.done;
+
+          setPhotos(updatedPhotos);
+          setSelectedItems([]);
+          setIsSelecting(false);
+        } catch (error) {
+          console.error("Error adding photos to new album:", error);
+          alert("Failed to add photos to the new album. Please try again.");
+        }
       }
     };
 
@@ -585,7 +750,22 @@ function PhotoGallery() {
 
   // Componente para visualização detalhada de foto/vídeo
   const DetailView = () => {
-    if (!currentPhoto) return null;
+    const [currentPhotoUrl, setCurrentPhotoUrl] = useState(null);
+
+    useEffect(() => {
+      if (currentPhoto) {
+        loadFileUrl(currentPhoto.fileId).then((url) => {
+          setCurrentPhotoUrl(url);
+        });
+      }
+      return () => {
+        if (currentPhotoUrl && !urlCache.current.has(currentPhoto?.fileId)) {
+          URL.revokeObjectURL(currentPhotoUrl);
+        }
+      };
+    }, [currentPhoto]);
+
+    if (!currentPhoto || !currentPhotoUrl) return null;
 
     return (
       <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
@@ -604,7 +784,7 @@ function PhotoGallery() {
             <button
               onClick={() => {
                 const a = document.createElement("a");
-                a.href = currentPhoto.url;
+                a.href = currentPhotoUrl;
                 a.download = currentPhoto.name;
                 document.body.appendChild(a);
                 a.click();
@@ -640,10 +820,10 @@ function PhotoGallery() {
 
         <div className="flex-1 flex items-center justify-center p-4 relative">
           {currentPhoto.type === "video" ? (
-            <video src={currentPhoto.url} className="max-h-full max-w-full object-contain" controls autoPlay />
+            <video src={currentPhotoUrl} className="max-h-full max-w-full object-contain" controls autoPlay />
           ) : (
             <img
-              src={currentPhoto.url || "/placeholder.svg"}
+              src={currentPhotoUrl || "/placeholder.svg"}
               alt={currentPhoto.name}
               className="max-h-full max-w-full object-contain"
             />
@@ -891,59 +1071,18 @@ function PhotoGallery() {
 
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
                         {groupedPhotos[date].map((photo) => (
-                          <div
+                          <PhotoItem
                             key={photo.id}
-                            className={cn(
-                              "group relative aspect-square rounded-md overflow-hidden border-2 transition-all duration-200",
-                              isSelecting && selectedItems.includes(photo.id)
-                                ? "border-primary ring-2 ring-primary"
-                                : draggedItem === photo.id
-                                ? "border-primary/50 opacity-50"
-                                : "border-transparent hover:border-primary/20"
-                            )}
-                            onClick={() => handleSelectItem(photo.id)}
-                            onContextMenu={(e) => handleContextMenu(e, photo.id)}
-                            draggable={!isSelecting}
-                            onDragStart={(e) => {
-                              e.dataTransfer.setData("text/plain", photo.id);
-                              setDraggedItem(photo.id);
-                            }}
-                            onDragEnd={() => {
-                              setDraggedItem(null);
-                              setDragOverAlbum(null);
-                            }}
-                          >
-                            {photo.type === "video" ? (
-                              <div className="h-full w-full bg-black flex items-center justify-center">
-                                <video src={photo.url} className="h-full w-full object-contain" />
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                  <div className="h-12 w-12 rounded-full bg-black/50 flex items-center justify-center">
-                                    <Play className="h-6 w-6 text-white" />
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <img
-                                src={photo.url || "/placeholder.svg"}
-                                alt={photo.name}
-                                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                              />
-                            )}
-
-                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
-                              <p className="text-white text-sm truncate">{photo.name}</p>
-                            </div>
-
-                            {isSelecting && (
-                              <div className="absolute top-2 right-2 h-6 w-6 rounded-full bg-background/80 flex items-center justify-center">
-                                {selectedItems.includes(photo.id) ? (
-                                  <Check className="h-4 w-4 text-primary" />
-                                ) : (
-                                  <div className="h-4 w-4 rounded-full border-2 border-foreground" />
-                                )}
-                              </div>
-                            )}
-                          </div>
+                            photo={photo}
+                            isSelecting={isSelecting}
+                            selectedItems={selectedItems}
+                            draggedItem={draggedItem}
+                            handleSelectItem={handleSelectItem}
+                            handleContextMenu={handleContextMenu}
+                            setDraggedItem={setDraggedItem}
+                            setDragOverAlbum={setDragOverAlbum}
+                            loadFileUrl={loadFileUrl}
+                          />
                         ))}
                       </div>
                     </div>
@@ -962,5 +1101,88 @@ function PhotoGallery() {
     </div>
   );
 }
+
+// Componente para renderizar cada item de foto, com memo para evitar re-renderizações desnecessárias
+const PhotoItem = memo(
+  ({ photo, isSelecting, selectedItems, draggedItem, handleSelectItem, handleContextMenu, setDraggedItem, setDragOverAlbum, loadFileUrl }) => {
+    const [photoUrl, setPhotoUrl] = useState(null);
+
+    useEffect(() => {
+      loadFileUrl(photo.fileId).then((url) => {
+        setPhotoUrl(url);
+      });
+      return () => {
+        // Cleanup is handled in the parent component's urlCache
+      };
+    }, [photo.fileId, loadFileUrl]);
+
+    if (!photoUrl) return null;
+
+    return (
+      <div
+        className={cn(
+          "group relative aspect-square rounded-md overflow-hidden border-2 transition-all duration-200",
+          isSelecting && selectedItems.includes(photo.id)
+            ? "border-primary ring-2 ring-primary"
+            : draggedItem === photo.id
+            ? "border-primary/50 opacity-50"
+            : "border-transparent hover:border-primary/20"
+        )}
+        onClick={() => handleSelectItem(photo.id)}
+        onContextMenu={(e) => handleContextMenu(e, photo.id)}
+        draggable={!isSelecting}
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", photo.id);
+          setDraggedItem(photo.id);
+        }}
+        onDragEnd={() => {
+          setDraggedItem(null);
+          setDragOverAlbum(null);
+        }}
+      >
+        {photo.type === "video" ? (
+          <div className="h-full w-full bg-black flex items-center justify-center">
+            <video src={photoUrl} className="h-full w-full object-contain" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="h-12 w-12 rounded-full bg-black/50 flex items-center justify-center">
+                <Play className="h-6 w-6 text-white" />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <img
+            src={photoUrl || "/placeholder.svg"}
+            alt={photo.name}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        )}
+
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
+          <p className="text-white text-sm truncate">{photo.name}</p>
+        </div>
+
+        {isSelecting && (
+          <div className="absolute top-2 right-2 h-6 w-6 rounded-full bg-background/80 flex items-center justify-center">
+            {selectedItems.includes(photo.id) ? (
+              <Check className="h-4 w-4 text-primary" />
+            ) : (
+              <div className="h-4 w-4 rounded-full border-2 border-foreground" />
+            )}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prevProps, nextProps) => {
+    // Evitar re-renderizações se as props relevantes não mudaram
+    return (
+      prevProps.photo.id === nextProps.photo.id &&
+      prevProps.photo.fileId === nextProps.photo.fileId &&
+      prevProps.isSelecting === nextProps.isSelecting &&
+      prevProps.selectedItems.includes(prevProps.photo.id) === nextProps.selectedItems.includes(nextProps.photo.id) &&
+      prevProps.draggedItem === nextProps.draggedItem
+    );
+  }
+);
 
 export default PhotoGallery;
