@@ -1,20 +1,30 @@
-"use client"
+"use client";
 
-import { useState, useRef, useEffect } from "react"
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-react"
-import { cn } from "../lib/utils"
+import { useState, useRef, useEffect } from "react";
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Plus, X } from "lucide-react";
+import { cn } from "../lib/utils";
 
 function MusicPlayer() {
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [volume, setVolume] = useState(0.7)
-  const [isMuted, setIsMuted] = useState(false)
-  const [isYouTubeApiReady, setIsYouTubeApiReady] = useState(false)
-  const [error, setError] = useState(null)
-  const audioRef = useRef(null)
-  const youtubePlayerRef = useRef(null)
-  const volumeTimeoutRef = useRef(null)
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(0.7);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isYouTubeApiReady, setIsYouTubeApiReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [isPopupOpen, setIsPopupOpen] = useState(false); // State for popup visibility
+  const [youtubeLink, setYoutubeLink] = useState(""); // State for YouTube link input
+  const audioRef = useRef(null);
+  const youtubePlayerRef = useRef(null);
+  const volumeTimeoutRef = useRef(null);
+  const hasEndedRef = useRef(false);
+  const intervalRef = useRef(null);
+  const crossfadeIntervalRef = useRef(null);
+
+  const crossfadeDuration = 2000;
+  const crossfadeStart = 3000;
+  const crossfadeSteps = 20;
 
   const initialSongs = [
     {
@@ -45,118 +55,189 @@ function MusicPlayer() {
       isYouTube: true,
       cover: "",
     },
-  ]
+  ];
 
-  const [songs, setSongs] = useState(initialSongs)
-  const [currentSongIndex, setCurrentSongIndex] = useState(0)
-  const currentSong = songs[currentSongIndex]
+  const [queue, setQueue] = useState(initialSongs); // Queue of songs to play
+  const [currentSong, setCurrentSong] = useState(queue[0] || null); // Current song being played
 
   // Load YouTube IFrame API and wait for it to be ready
   useEffect(() => {
     if (!window.YT) {
-      const tag = document.createElement("script")
-      tag.src = "https://www.youtube.com/iframe_api"
-      const firstScriptTag = document.getElementsByTagName("script")[0]
-      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      const firstScriptTag = document.getElementsByTagName("script")[0];
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
       window.onYouTubeIframeAPIReady = () => {
-        setIsYouTubeApiReady(true)
-      }
+        setIsYouTubeApiReady(true);
+      };
     } else {
-      setIsYouTubeApiReady(true)
+      setIsYouTubeApiReady(true);
     }
 
     return () => {
-      delete window.onYouTubeIframeAPIReady
-    }
-  }, [])
+      delete window.onYouTubeIframeAPIReady;
+    };
+  }, []);
 
-  // Dynamically set thumbnails for YouTube songs
+  // Dynamically set thumbnails for YouTube songs in the queue
   useEffect(() => {
-    const updatedSongs = initialSongs.map((song) => {
-      if (song.isYouTube) {
+    const updatedQueue = queue.map((song) => {
+      if (song.isYouTube && !song.cover) {
         try {
-          const url = new URL(song.src)
-          const videoId = url.searchParams.get("v") || song.src.split("v=")[1]?.split("&")[0]
+          const url = new URL(song.src);
+          const videoId = url.searchParams.get("v") || song.src.split("v=")[1]?.split("&")[0];
           if (videoId) {
             return {
               ...song,
               cover: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-            }
+            };
           }
         } catch (error) {
-          console.error("Invalid YouTube URL for thumbnail:", song.src)
+          console.error("Invalid YouTube URL for thumbnail:", song.src);
         }
       }
-      return song
-    })
-    setSongs(updatedSongs)
-  }, [])
+      return song;
+    });
+    setQueue(updatedQueue);
+  }, [queue.length]); // Update thumbnails when queue length changes
 
-  // Reset currentTime and duration when switching songs
+  // Reset currentTime, duration, and loading state when switching songs
   useEffect(() => {
-    setCurrentTime(0)
-    setDuration(0)
-    setIsPlaying(false)
-    setError(null)
-  }, [currentSongIndex])
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPlaying(false);
+    setError(null);
+    setIsLoading(true);
+    hasEndedRef.current = false;
+    setCurrentSong(queue[0] || null);
+  }, [queue]);
+
+  // Handle YouTube Link Submission
+  const handleAddSong = () => {
+    if (!youtubeLink) {
+      setError("Please enter a YouTube link.");
+      return;
+    }
+
+    let videoId = "";
+    try {
+      const url = new URL(youtubeLink);
+      videoId = url.searchParams.get("v") || youtubeLink.split("v=")[1]?.split("&")[0];
+    } catch (error) {
+      setError("Invalid YouTube URL. Please try again.");
+      return;
+    }
+
+    if (!videoId) {
+      setError("Could not extract video ID from URL.");
+      return;
+    }
+
+    const newSong = {
+      title: "Unknown Title", // YouTube API could be used to fetch the title
+      artist: "Unknown Artist",
+      src: youtubeLink,
+      isYouTube: true,
+      cover: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+    };
+
+    setQueue((prevQueue) => [...prevQueue, newSong]);
+    setYoutubeLink("");
+    setIsPopupOpen(false);
+    setError(null);
+  };
 
   // Handle YouTube Player for YouTube tracks
   useEffect(() => {
-    let interval = null
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
 
-    if (currentSong.isYouTube && isYouTubeApiReady) {
+    if (currentSong?.isYouTube && isYouTubeApiReady) {
       if (!window.YT || !window.YT.Player) {
-        setError("Failed to load YouTube API. Please try again later.")
-        return
+        setError("Failed to load YouTube API. Please try again later.");
+        setIsLoading(false);
+        return;
       }
 
-      let videoId = ""
+      let videoId = "";
       try {
-        const url = new URL(currentSong.src)
-        videoId = url.searchParams.get("v") || currentSong.src.split("v=")[1]?.split("&")[0]
+        const url = new URL(currentSong.src);
+        videoId = url.searchParams.get("v") || currentSong.src.split("v=")[1]?.split("&")[0];
       } catch (error) {
-        setError("Invalid YouTube URL: " + currentSong.src)
-        return
+        setError("Invalid YouTube URL: " + currentSong.src);
+        setIsLoading(false);
+        return;
       }
 
       if (!videoId) {
-        setError("Could not extract video ID from URL: " + currentSong.src)
-        return
+        setError("Could not extract video ID from URL: " + currentSong.src);
+        setIsLoading(false);
+        return;
       }
 
       const onPlayerReady = (event) => {
-        event.target.setVolume(volume * 100)
-        if (isPlaying) event.target.playVideo()
-      }
+        setIsLoading(false);
+        event.target.setVolume(isMuted ? 0 : volume * 100);
+        if (isPlaying) event.target.playVideo();
+      };
 
       const onPlayerStateChange = (event) => {
         if (event.data === window.YT.PlayerState.PLAYING) {
-          setIsPlaying(true)
-          const duration = event.target.getDuration()
-          setDuration(duration)
+          setIsPlaying(true);
+          const duration = event.target.getDuration();
+          setDuration(duration);
 
-          interval = setInterval(() => {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+          }
+
+          intervalRef.current = setInterval(() => {
             if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === "function") {
-              const current = youtubePlayerRef.current.getCurrentTime()
-              setCurrentTime(current)
-              if (current >= duration) {
-                clearInterval(interval)
-                nextSong()
+              const current = youtubePlayerRef.current.getCurrentTime();
+              console.log(`Song: ${currentSong.title}, Current: ${current}, Duration: ${duration}`);
+              setCurrentTime(current);
+
+              if (current >= duration - crossfadeStart && current < duration - crossfadeStart + 0.5 && !hasEndedRef.current) {
+                console.log("Starting crossfade for YouTube track");
+                startCrossfade(true, (nextVolume) => {
+                  if (!hasEndedRef.current) {
+                    hasEndedRef.current = true;
+                    nextSongWithFadeIn(nextVolume);
+                  }
+                });
+              }
+
+              if (current >= duration - 0.5 && !hasEndedRef.current) {
+                console.log("Switching song via interval (YouTube)");
+                clearInterval(intervalRef.current);
+                hasEndedRef.current = true;
+                nextSongWithFadeIn(isMuted ? 0 : volume);
               }
             }
-          }, 250) // Update every 250ms for smoother progress
+          }, 250);
         } else if (event.data === window.YT.PlayerState.PAUSED) {
-          setIsPlaying(false)
-          clearInterval(interval)
+          setIsPlaying(false);
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+          }
         } else if (event.data === window.YT.PlayerState.ENDED) {
-          clearInterval(interval)
-          nextSong()
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+          }
+          if (!hasEndedRef.current) {
+            console.log("Switching song via ENDED event (YouTube)");
+            hasEndedRef.current = true;
+            nextSongWithFadeIn(isMuted ? 0 : volume);
+          }
         }
-      }
+      };
 
       if (youtubePlayerRef.current) {
-        youtubePlayerRef.current.destroy()
+        youtubePlayerRef.current.destroy();
+        youtubePlayerRef.current = null;
       }
 
       youtubePlayerRef.current = new window.YT.Player("youtube-player", {
@@ -171,248 +252,459 @@ function MusicPlayer() {
           onReady: onPlayerReady,
           onStateChange: onPlayerStateChange,
         },
-      })
+      });
     }
 
     return () => {
-      if (interval) {
-        clearInterval(interval)
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (crossfadeIntervalRef.current) {
+        clearInterval(crossfadeIntervalRef.current);
+        crossfadeIntervalRef.current = null;
       }
       if (youtubePlayerRef.current) {
-        youtubePlayerRef.current.destroy()
-        youtubePlayerRef.current = null
+        youtubePlayerRef.current.destroy();
+        youtubePlayerRef.current = null;
       }
-    }
-  }, [currentSongIndex, isYouTubeApiReady])
+    };
+  }, [currentSong, isYouTubeApiReady]);
 
   // Update YouTube player volume when volume changes
   useEffect(() => {
-    if (currentSong.isYouTube && youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
-      youtubePlayerRef.current.setVolume(isMuted ? 0 : volume * 100)
+    if (currentSong?.isYouTube && youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
+      youtubePlayerRef.current.setVolume(isMuted ? 0 : volume * 100);
     }
-  }, [volume, isMuted])
+  }, [volume, isMuted]);
 
   // Handle <audio> element for non-YouTube tracks
   useEffect(() => {
-    if (!currentSong.isYouTube) {
-      const audio = audioRef.current
+    if (currentSong && !currentSong.isYouTube) {
+      const audio = audioRef.current;
 
       const updateTime = () => {
-        setCurrentTime(audio.currentTime)
-      }
-      const updateDuration = () => {
-        setDuration(audio.duration)
-      }
-      const endedHandler = () => {
-        nextSong()
-      }
+        const current = audio.currentTime;
+        setCurrentTime(current);
 
-      audio.addEventListener("timeupdate", updateTime)
-      audio.addEventListener("loadedmetadata", updateDuration)
-      audio.addEventListener("ended", endedHandler)
+        if (current >= duration - crossfadeStart && current < duration - crossfadeStart + 0.5 && !hasEndedRef.current) {
+          console.log("Starting crossfade for <audio> track");
+          startCrossfade(false, (nextVolume) => {
+            if (!hasEndedRef.current) {
+              hasEndedRef.current = true;
+              nextSongWithFadeIn(nextVolume);
+            }
+          });
+        }
+      };
+
+      const updateDuration = () => {
+        setDuration(audio.duration);
+        setIsLoading(false);
+      };
+
+      const endedHandler = () => {
+        if (!hasEndedRef.current) {
+          console.log("Switching song via <audio> ended event");
+          hasEndedRef.current = true;
+          nextSongWithFadeIn(isMuted ? 0 : volume);
+        }
+      };
+
+      audio.addEventListener("timeupdate", updateTime);
+      audio.addEventListener("loadedmetadata", updateDuration);
+      audio.addEventListener("ended", endedHandler);
 
       if (isPlaying) {
         audio.play().catch((error) => {
-          setError("Error playing audio: " + error.message)
-        })
+          setError("Error playing audio: " + error.message);
+          setIsLoading(false);
+        });
       }
 
-      audio.volume = isMuted ? 0 : volume
+      audio.volume = isMuted ? 0 : volume;
 
       return () => {
-        audio.removeEventListener("timeupdate", updateTime)
-        audio.removeEventListener("loadedmetadata", updateDuration)
-        audio.removeEventListener("ended", endedHandler)
-        audio.pause()
-      }
+        audio.removeEventListener("timeupdate", updateTime);
+        audio.removeEventListener("loadedmetadata", updateDuration);
+        audio.removeEventListener("ended", endedHandler);
+        audio.pause();
+        if (crossfadeIntervalRef.current) {
+          clearInterval(crossfadeIntervalRef.current);
+          crossfadeIntervalRef.current = null;
+        }
+      };
     }
-  }, [currentSongIndex, isPlaying, volume, isMuted])
+  }, [currentSong, isPlaying, volume, isMuted, duration]);
 
   const togglePlay = () => {
-    if (currentSong.isYouTube) {
+    if (currentSong?.isYouTube) {
       if (!youtubePlayerRef.current || typeof youtubePlayerRef.current.playVideo !== "function") {
-        setError("YouTube player not initialized. Please try again.")
-        return
+        setError("YouTube player not initialized. Please try again.");
+        return;
       }
       if (isPlaying) {
-        youtubePlayerRef.current.pauseVideo()
+        youtubePlayerRef.current.pauseVideo();
       } else {
-        youtubePlayerRef.current.playVideo()
+        youtubePlayerRef.current.playVideo();
       }
-      setIsPlaying(!isPlaying)
-    } else {
-      const audio = audioRef.current
+      setIsPlaying(!isPlaying);
+    } else if (currentSong) {
+      const audio = audioRef.current;
       if (isPlaying) {
-        audio.pause()
+        audio.pause();
       } else {
         audio.play().catch((error) => {
-          setError("Error playing audio: " + error.message)
-        })
+          setError("Error playing audio: " + error.message);
+        });
       }
-      setIsPlaying(!isPlaying)
+      setIsPlaying(!isPlaying);
     }
-  }
+  };
 
   const formatTime = (time) => {
-    const minutes = Math.floor(time / 60)
-    const seconds = Math.floor(time % 60)
-    return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`
-  }
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
+  };
 
   const handleProgress = (e) => {
-    const newTime = e.target.value
-    setCurrentTime(newTime)
-    if (currentSong.isYouTube) {
+    const newTime = e.target.value;
+    setCurrentTime(newTime);
+    if (currentSong?.isYouTube) {
       if (youtubePlayerRef.current && typeof youtubePlayerRef.current.seekTo === "function") {
-        youtubePlayerRef.current.seekTo(newTime)
+        youtubePlayerRef.current.seekTo(newTime);
       }
-    } else {
-      audioRef.current.currentTime = newTime
+    } else if (currentSong) {
+      audioRef.current.currentTime = newTime;
     }
-  }
+  };
 
   const handleVolume = (e) => {
-    const newVolume = Number.parseFloat(e.target.value)
-    setVolume(newVolume)
+    const newVolume = Number.parseFloat(e.target.value);
+    setVolume(newVolume);
 
     if (volumeTimeoutRef.current) {
-      clearTimeout(volumeTimeoutRef.current)
+      clearTimeout(volumeTimeoutRef.current);
     }
 
     volumeTimeoutRef.current = setTimeout(() => {
-      if (currentSong.isYouTube) {
+      if (currentSong?.isYouTube) {
         if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
-          youtubePlayerRef.current.setVolume(newVolume * 100)
+          youtubePlayerRef.current.setVolume(newVolume * 100);
         } else {
-          setError("YouTube player not ready to adjust volume.")
+          setError("YouTube player not ready to adjust volume.");
         }
-      } else {
-        audioRef.current.volume = newVolume
+      } else if (currentSong) {
+        audioRef.current.volume = newVolume;
       }
-    }, 100)
+    }, 100);
 
     if (newVolume === 0) {
-      setIsMuted(true)
+      setIsMuted(true);
     } else {
-      setIsMuted(false)
+      setIsMuted(false);
     }
-  }
+  };
 
   const toggleMute = () => {
     if (isMuted) {
-      if (currentSong.isYouTube) {
+      if (currentSong?.isYouTube) {
         if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
-          youtubePlayerRef.current.setVolume(volume * 100)
+          youtubePlayerRef.current.setVolume(volume * 100);
         } else {
-          setError("YouTube player not ready to adjust volume.")
+          setError("YouTube player not ready to adjust volume.");
         }
-      } else {
-        audioRef.current.volume = volume
+      } else if (currentSong) {
+        audioRef.current.volume = volume;
       }
-      setIsMuted(false)
+      setIsMuted(false);
     } else {
-      if (currentSong.isYouTube) {
+      if (currentSong?.isYouTube) {
         if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
-          youtubePlayerRef.current.setVolume(0)
+          youtubePlayerRef.current.setVolume(0);
         } else {
-          setError("YouTube player not ready to adjust volume.")
+          setError("YouTube player not ready to adjust volume.");
         }
-      } else {
-        audioRef.current.volume = 0
+      } else if (currentSong) {
+        audioRef.current.volume = 0;
       }
-      setIsMuted(true)
+      setIsMuted(true);
     }
-  }
+  };
 
   const prevSong = () => {
-    setCurrentSongIndex((prevIndex) => (prevIndex === 0 ? songs.length - 1 : prevIndex - 1))
-  }
+    setQueue((prevQueue) => {
+      if (prevQueue.length <= 1) {
+        return initialSongs; // Reset to initial songs if queue is empty
+      }
+      const newQueue = [...prevQueue];
+      const lastSong = newQueue.pop(); // Remove the current song
+      return [lastSong, ...newQueue]; // Move the last song to the front
+    });
+  };
 
   const nextSong = () => {
-    setCurrentSongIndex((prevIndex) => (prevIndex === songs.length - 1 ? 0 : prevIndex + 1))
-  }
+    setQueue((prevQueue) => {
+      if (prevQueue.length <= 1) {
+        return initialSongs; // Reset to initial songs if queue is empty
+      }
+      const newQueue = prevQueue.slice(1); // Remove the current song
+      return newQueue.length > 0 ? newQueue : initialSongs;
+    });
+  };
+
+  const startCrossfade = (isYouTube, onComplete) => {
+    if (crossfadeIntervalRef.current) {
+      clearInterval(crossfadeIntervalRef.current);
+    }
+
+    let step = 0;
+    const stepDuration = crossfadeDuration / crossfadeSteps;
+    const volumeStep = (isMuted ? 0 : volume) / crossfadeSteps;
+
+    let currentVolume = isMuted ? 0 : volume;
+    let nextVolume = 0;
+
+    crossfadeIntervalRef.current = setInterval(() => {
+      step++;
+      currentVolume = Math.max(0, currentVolume - volumeStep);
+      nextVolume = Math.min(isMuted ? 0 : volume, nextVolume + volumeStep);
+
+      if (isYouTube) {
+        if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
+          youtubePlayerRef.current.setVolume(currentVolume * 100);
+        }
+      } else {
+        if (audioRef.current) {
+          audioRef.current.volume = currentVolume;
+        }
+      }
+
+      if (step >= crossfadeSteps) {
+        clearInterval(crossfadeIntervalRef.current);
+        onComplete(nextVolume);
+      }
+    }, stepDuration);
+  };
+
+  const nextSongWithFadeIn = (startVolume) => {
+    setQueue((prevQueue) => {
+      if (prevQueue.length <= 1) {
+        return initialSongs; // Reset to initial songs if queue is empty
+      }
+      const newQueue = prevQueue.slice(1);
+      return newQueue.length > 0 ? newQueue : initialSongs;
+    });
+
+    // Set initial volume to 0 for fade-in
+    if (currentSong?.isYouTube) {
+      if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
+        youtubePlayerRef.current.setVolume(0);
+      }
+    } else if (currentSong) {
+      if (audioRef.current) {
+        audioRef.current.volume = 0;
+      }
+    }
+
+    // Fade in the next song
+    let step = 0;
+    const stepDuration = crossfadeDuration / crossfadeSteps;
+    const volumeStep = startVolume / crossfadeSteps;
+    let currentVolume = 0;
+
+    if (crossfadeIntervalRef.current) {
+      clearInterval(crossfadeIntervalRef.current);
+    }
+
+    crossfadeIntervalRef.current = setInterval(() => {
+      step++;
+      currentVolume = Math.min(startVolume, currentVolume + volumeStep);
+
+      if (currentSong?.isYouTube) {
+        if (youtubePlayerRef.current && typeof youtubePlayerRef.current.setVolume === "function") {
+          youtubePlayerRef.current.setVolume(currentVolume * 100);
+        }
+      } else if (currentSong) {
+        if (audioRef.current) {
+          audioRef.current.volume = currentVolume;
+        }
+      }
+
+      if (step >= crossfadeSteps) {
+        clearInterval(crossfadeIntervalRef.current);
+      }
+    }, stepDuration);
+  };
 
   return (
     <div className="max-w-md mx-auto">
-      <div className="frosted-glass rounded-lg shadow-lg overflow-hidden">
-        {error && (
-          <div className="p-4 bg-red-500 text-white text-center">
-            {error}
-          </div>
-        )}
-        <div className="relative">
-          <div className="w-full aspect-square bg-muted overflow-hidden">
-            <div className="relative w-full h-full">
-              <img
-                src={currentSong.cover || "/placeholder.svg?height=300&width=300"}
-                alt={currentSong.title}
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-            </div>
-          </div>
-
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end">
-            <div className="p-6 text-white w-full">
-              <h3 className="text-xl font-bold truncate">{currentSong.title}</h3>
-              <p className="text-sm opacity-80 truncate">{currentSong.artist}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-4">
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>{formatTime(currentTime)}</span>
-              <span>{formatTime(duration)}</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max={duration || 0}
-              value={currentTime}
-              onChange={handleProgress}
-              className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
-            />
-          </div>
-
-          <div className="flex justify-center items-center gap-4">
-            <button onClick={prevSong} className="p-2 rounded-full hover:bg-background/50 transition-colors">
-              <SkipBack className="h-6 w-6" />
-            </button>
-
-            <button
-              onClick={togglePlay}
-              className="p-4 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95"
-            >
-              {isPlaying ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
-            </button>
-
-            <button onClick={nextSong} className="p-2 rounded-full hover:bg-background/50 transition-colors">
-              <SkipForward className="h-6 w-6" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button onClick={toggleMute} className="text-muted-foreground">
-              {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-            </button>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={isMuted ? 0 : volume}
-              onChange={handleVolume}
-              className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
-            />
-          </div>
-        </div>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold">Music Player</h2>
+        <button
+          onClick={() => setIsPopupOpen(true)}
+          className="p-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+          aria-label="Add Song"
+        >
+          <Plus className="h-5 w-5" />
+        </button>
       </div>
 
-      <audio ref={audioRef} src={currentSong.isYouTube ? undefined : currentSong.src} className="hidden" />
+      {/* Popup for adding YouTube link */}
+      {isPopupOpen && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
+          <div className="frosted-glass rounded-lg p-6 w-full max-w-sm backdrop-blur-md bg-white/10 border border-white/20">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-white">Add YouTube Song</h3>
+              <button
+                onClick={() => setIsPopupOpen(false)}
+                className="text-white hover:text-gray-300"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={youtubeLink}
+              onChange={(e) => setYoutubeLink(e.target.value)}
+              placeholder="Enter YouTube link"
+              className="w-full p-2 rounded-md bg-gray-800 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary mb-4"
+            />
+            {error && (
+              <div className="text-red-500 text-sm mb-4">{error}</div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setIsPopupOpen(false)}
+                className="px-4 py-2 rounded-md bg-gray-600 text-white hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddSong}
+                className="px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Music Player */}
+      <div className="frosted-glass rounded-lg shadow-lg overflow-hidden">
+        {error && !isPopupOpen && (
+          <div className="p-4 bg-red-500 text-white text-center">{error}</div>
+        )}
+        {currentSong ? (
+          <>
+            <div className="relative">
+              <div className="w-full aspect-square bg-muted overflow-hidden">
+                <div className="relative w-full h-full">
+                  <img
+                    src={currentSong.cover || "/placeholder.svg?height=300&width=300"}
+                    alt={currentSong.title}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                </div>
+              </div>
+
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end">
+                <div className="p-6 text-white w-full">
+                  <h3 className="text-xl font-bold truncate">{currentSong.title}</h3>
+                  <p className="text-sm opacity-80 truncate">{currentSong.artist}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>{formatTime(currentTime)}</span>
+                  <span>{formatTime(duration)}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max={duration || 0}
+                  value={currentTime}
+                  onChange={handleProgress}
+                  disabled={isLoading}
+                  className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary disabled:opacity-50"
+                />
+              </div>
+
+              <div className="flex justify-center items-center gap-4">
+                <button onClick={prevSong} className="p-2 rounded-full hover:bg-background/50 transition-colors">
+                  <SkipBack className="h-6 w-6" />
+                </button>
+
+                <button
+                  onClick={togglePlay}
+                  className="p-4 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95"
+                >
+                  {isPlaying ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
+                </button>
+
+                <button onClick={nextSong} className="p-2 rounded-full hover:bg-background/50 transition-colors">
+                  <SkipForward className="h-6 w-6" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button onClick={toggleMute} className="text-muted-foreground">
+                  {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolume}
+                  className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+                />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="p-6 text-center text-muted-foreground">
+            No songs in queue. Add a song to start playing.
+          </div>
+        )}
+      </div>
+
+      {/* Queue Display */}
+      {queue.length > 1 && (
+        <div className="mt-6">
+          <h3 className="text-lg font-semibold mb-2">Up Next</h3>
+          <ul className="space-y-2">
+            {queue.slice(1).map((song, index) => (
+              <li
+                key={index}
+                className="flex items-center gap-3 p-2 rounded-md bg-gray-800/50 hover:bg-gray-700/50 transition-colors"
+              >
+                <img
+                  src={song.cover || "/placeholder.svg?height=40&width=40"}
+                  alt={song.title}
+                  className="w-10 h-10 rounded-md object-cover"
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-medium truncate">{song.title}</p>
+                  <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <audio ref={audioRef} src={currentSong && !currentSong.isYouTube ? currentSong.src : undefined} className="hidden" />
       <div id="youtube-player" className="hidden"></div>
     </div>
-  )
+  );
 }
 
-export default MusicPlayer
+export default MusicPlayer;

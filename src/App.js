@@ -1,13 +1,15 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Home, ListTodo, CalculatorIcon, FileText, Music, Dices } from "lucide-react"
+import { Home, ListTodo, CalculatorIcon, FileText, Music, Dices, Link, Image } from "lucide-react"
 import { ThemeProvider } from "./components/theme-provider"
 import TodoList from "./components/TodoList"
 import Calculator from "./components/Calculator"
 import NoteApp from "./components/NoteApp"
 import MusicPlayer from "./components/MusicPlayer"
 import Roulette from "./components/Roulette"
+import Shortcuts from "./components/shortcuts"
+import PhotoGallery from "./components/PhotoGallery"
 import Welcome from "./components/Welcome"
 import { Header } from "./components/Header"
 import { Footer } from "./components/Footer"
@@ -26,6 +28,8 @@ function App() {
 
   const tabs = [
     { id: "welcome", label: "Bem-vinda", icon: <Home className="h-5 w-5" /> },
+    { id: "shortcuts", label: "Atalhos", icon: <Link className="h-5 w-5" /> },
+    { id: "gallery", label: "Galeria", icon: <Image className="h-5 w-5" /> },
     { id: "todo", label: "Lista de Tarefas", icon: <ListTodo className="h-5 w-5" /> },
     { id: "calc", label: "Calculadora", icon: <CalculatorIcon className="h-5 w-5" /> },
     { id: "notes", label: "Notas", icon: <FileText className="h-5 w-5" /> },
@@ -37,6 +41,10 @@ function App() {
     switch (activeTab) {
       case "welcome":
         return <Welcome />
+      case "shortcuts":
+        return <Shortcuts />
+      case "gallery":
+        return <PhotoGallery />
       case "todo":
         return <TodoList />
       case "calc":
@@ -53,7 +61,7 @@ function App() {
   }
 
   return (
-    <ThemeProvider defaultTheme="light" storageKey="app-theme">
+    <ThemeProvider defaultTheme="dark" storageKey="app-theme">
       <div className="min-h-screen flex flex-col bg-background text-foreground">
         <Header />
 

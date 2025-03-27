@@ -150,6 +150,15 @@
   }
 }
 
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.3s ease-in-out forwards;
 }
@@ -174,6 +183,12 @@
   animation: spin 1s linear infinite;
 }
 
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
 /* Efeito de vidro fosco */
 .frosted-glass {
   @apply bg-white/20 dark:bg-black/20 backdrop-blur-md border border-white/30 dark:border-white/10;
@@ -181,5 +196,15 @@
 
 .frosted-glass-strong {
   @apply bg-white/40 dark:bg-black/40 backdrop-blur-lg border border-white/30 dark:border-white/10;
+}
+
+/* Estilos específicos para os cards de atalho */
+.shortcut-card {
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.shortcut-card:hover {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1), 0 0 15px 2px
+    var(--highlight-color, hsl(var(--primary))) / 20;
 }
 
